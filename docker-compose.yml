@@ -1,0 +1,82 @@
+version: '3.7'
+# ====================================== AIRFLOW ENVIRONMENT VARIABLES =======================================
+x-environment: &airflow_environment
+  - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  - AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS=False
+  - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://airflow:airflow@postgres:5432/airflow
+  - AIRFLOW__CORE__STORE_DAG_CODE=True
+  - AIRFLOW__CORE__STORE_SERIALIZED_DAGS=True
+  - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+  - AIRFLOW__WEBSERVER__RBAC=False
+x-airflow-image: &airflow_image apache/airflow:2.0.0-python3.8
+# ====================================== /AIRFLOW ENVIRONMENT VARIABLES ======================================
+services:
+  postgres:
+    image: postgres:12-alpine
+    environment:
+        # 환경 변수로 DBeaver 등에서 확인할 때 id, 비밀번호, db 이름
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+  # 초기화를 하는 부분
+  init: # 실행할 서비스의 이름
+    build:
+    # 사용할 파일의 위치
+      context: docker/airflow-data
+      args:
+      # airflow 이미지 사용
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    image: manning-airflow/airflow-data
+    # 의존성
+    depends_on:
+      - postgres
+    environment: *airflow_environment
+    entrypoint: /bin/bash
+    # 접속할 때 사용할 아이디와 비밀번호
+    # first, last name 은 중요하지 않음
+    command: -c 'airflow db upgrade && sleep 5 && airflow users create --username admin --password admin --firstname Anonymous --lastname Admin --role Admin --email admin@example.org'
+  
+  # airflow 웹 서버 구동
+  webserver:
+    build:
+      context: docker/airflow-data
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    image: manning-airflow/airflow-data
+    restart: always
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    # 로컬의 디렉토리와 도커 이미지 안의 디렉토리를 연결
+    volumes:
+      - logs:/opt/airflow/logs
+    environment: *airflow_environment
+    # 웹 서버를 구동하는 명령
+    command: webserver
+  # airflow 작업 수행을 위한 scheduler 생성
+  scheduler:
+    build:
+      context: docker/airflow-data
+      args:
+        AIRFLOW_BASE_IMAGE: *airflow_image
+    image: manning-airflow/airflow-data
+    restart: always
+    depends_on:
+      - postgres
+    # dags 디렉토리에 DAG 파일을 넣으면 자동으로 인식하도록 설정
+    # log 와 data 디렉토리도 매핑
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - logs:/opt/airflow/logs
+      - data:/data
+    environment: *airflow_environment
+    command: scheduler
+
+# 볼륨 생성 - data, logs
+volumes:
+  data:
+  logs:
